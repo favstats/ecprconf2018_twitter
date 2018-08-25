@@ -1,0 +1,251 @@
+---
+title: "ECPR Conference 2018 Twitter Analysis"
+author: "Fabio"
+date: "2018-08-25"
+output: github_document
+---
+
+This is a short notebook outlining the code used to scrape tweets related to the ECPR Conference 2018 in Hamburg.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, error = F, warning = F)
+```
+
+
+## Packages
+
+Load the necessary packages
+
+```{r}
+# install pacman once if not avaible on your machine
+# install.packages("pacman")
+
+pacman::p_load(tidyverse, purrr, tidyr, rtweet, stringr, ggraph, igraph, tidygraph, forcats)
+```
+
+
+## Get Data
+
+Call Twitter API. If you want to scrape data yourself you have to register a free account where you get your personal access point to Twitter. Check out [`rtweet`](https://github.com/mkearney/rtweet/) on github and follow their instructions to the twitter authentication. 
+
+```{r, eval = F}
+twitter_token <- readRDS("twitter_token.rds")
+
+rt <- search_tweets(
+  "#ecprconf18 OR #ecprconf2018", n = 5000, include_rts = F, retryonratelimit = T
+)
+save(rt, file = "data/rt.Rdata")
+```
+
+Lets first look at the data structure and column names. Twitter returns over 1,200 unique tweets.
+
+```{r}
+load("data/rt.Rdata")
+
+rt %>% glimpse # the same as str, returns a df overview
+```
+
+
+The top ten retweeted tweets.
+
+```{r, results="asis"}
+# load("rt.Rdata")
+rt %>% 
+  select(screen_name, text, retweet_count) %>% 
+  filter(!str_detect(text, "^RT")) %>% 
+  mutate(text = str_replace_all(text, "\\\n", " ")) %>% 
+  arrange(desc(retweet_count)) %>% 
+  top_n(n = 10) %>% 
+  knitr::kable(., format = "markdown")
+```
+
+
+## Timeline
+
+What was the best time to tweet?
+
+```{r}
+rt %>%
+  ## parse date format
+  mutate(
+    cdate = created_at %>% 
+      str_extract("\\d{4}-\\d{2}-\\d{2}") %>% 
+      lubridate::ymd(),
+    hour = lubridate::hour(created_at)
+  ) %>%
+  ## select relevant time period
+  filter(cdate >= as.Date("2018-08-23")) %>% 
+  ## count tweet per and and hour
+  group_by(cdate, hour) %>%
+  tally %>%
+  ungroup %>%
+  ggplot(aes(hour, n)) +
+  geom_line() +
+  ## split the visualization 
+  facet_wrap(~cdate, ncol = 1) +
+  theme_minimal() +
+  ggtitle("Number of Tweets by Day and Hour") +
+  xlab("Hour of the Day") +
+  ylab("Number of Tweets")
+```
+
+
+## Retweet Network
+
+```{r, fig.width = 15, fig.height=15}
+rt_graph <- rt %>% 
+  ## select relevant variables
+  dplyr::select(screen_name, mentions_screen_name) %>% 
+  ## unnest list of mentions_screen_name
+  unnest %>% 
+  ## count the number of coocurences
+  group_by(screen_name, mentions_screen_name) %>% 
+  tally(sort = T) %>%
+  ungroup %>% 
+  ## drop missing values
+  drop_na %>% 
+  ## fliter those coocurences that appear at least 2 times
+  filter(n > 1) %>% 
+  ## transforming the dataframe to a graph object
+  as_tbl_graph() %>% 
+  ## calculating node centrality
+  mutate(popularity = centrality_degree(mode = 'in'))
+
+rt_graph %>% 
+  ## create graph layout
+  ggraph(layout = "kk") + 
+  ## define edge aestetics
+  geom_edge_fan(aes(alpha = n, edge_width = n, color = n)) + 
+  ## scale down link saturation
+  scale_edge_alpha(range = c(.5, .9)) +
+  ## define note size param
+  scale_edge_color_gradient(low = "gray50", high = "#1874CD") +
+  geom_node_point(aes(size = popularity), color = "gray30") +
+  ## equal width and height
+  coord_fixed() +
+  ## plain theme
+  theme_void() +
+  ## title
+  ggtitle("#ecprconf18 Twitter Mentions Network")
+
+rt_graph %>% 
+  ## create graph layout
+  ggraph(layout = "kk") + 
+  ## define edge aestetics
+  geom_edge_fan(aes(alpha = n, edge_width = n, color = n)) + 
+  ## scale down link saturation
+  scale_edge_alpha(range = c(.5, .9)) +
+  ## define note size param
+  scale_edge_color_gradient(low = "gray50", high = "#1874CD") +
+  geom_node_point(aes(size = popularity), color = "gray30") +
+  ## define node labels
+  geom_node_text(aes(label = name), repel = T, fontface = "bold") +
+  ## equal width and height
+  coord_fixed() +
+  ## plain theme
+  theme_void() +
+  ## title
+  ggtitle("#ecprconf18 Twitter Mentions Network")
+
+rt_graph %>% 
+  ## create graph layout
+  ggraph(layout = "circle") + 
+  ## define edge aestetics
+  geom_edge_fan(aes(alpha = n, edge_width = n, color = n)) + 
+  ## scale down link saturation
+  scale_edge_alpha(range = c(.5, .9)) +
+  ## define note size param
+  scale_edge_color_gradient(low = "gray50", high = "#1874CD") +
+  geom_node_point(aes(size = popularity), color = "gray30") +
+  ## define node labels
+  geom_node_text(aes(label = name), repel = F, fontface = "bold") +
+  ## equal width and height
+  coord_fixed() +
+  ## plain theme
+  theme_void() +
+  ## title
+  ggtitle("#ecprconf18 Twitter Mentions Network")
+```
+
+
+## Most Frequent Hashtags
+
+```{r}
+rt_hashtags <- rt %>% 
+  select(hashtags) %>% 
+  ## unnest list of hastags
+  unnest %>% 
+    na.omit %>% 
+  ## clean hashtags
+  mutate(hashtags = stringr::str_to_lower(hashtags) %>% 
+           str_replace_all("2018", "18") %>% 
+           ## add #symbol to vector
+           paste0("#", .)) %>% 
+  ## count each hashtag and sort
+  count(hashtags, sort = T) %>% 
+  filter(n > 5)
+
+rt_hashtags %>% 
+  filter(hashtags != "#ecprconf18") %>%
+  mutate(hashtags = forcats::fct_reorder(hashtags, n)) %>% 
+  ggplot(aes(hashtags, n)) +
+  geom_bar(stat = "identity", alpha = .7) +
+  coord_flip() +
+  theme_minimal() +
+  ggtitle("Most Frequent Hastags related to #ecprconf18")
+```
+
+## Most Frequent Bigram Network
+
+```{r}
+gg_bigram <- rt %>%
+  select(text) %>% 
+  ## remove text noise
+  mutate(text = stringr::str_remove_all(text, "w |amp ")) %>% 
+  ## remove retweets
+  filter(!stringr::str_detect(text, "^RT")) %>% 
+  ## remove urls
+  mutate(text = stringr::str_remove_all(text, "https?[:]//[[:graph:]]+")) %>% 
+  mutate(id = 1:n()) %>% 
+  ## split text into words
+  tidytext::unnest_tokens(word, text, token = "words") %>% 
+  ## remove stop words
+  anti_join(tidytext::stop_words) %>% 
+  ## paste words to text by id
+  group_by(id) %>% 
+  summarise(text = paste(word, collapse = " ")) %>% 
+  ungroup %>% 
+  ## again split text into bigrams (word occurences or collocations)
+  tidytext::unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+  separate(bigram, c("word1", "word2"), sep = " ") %>% 
+  ## remove the hashtag and count bigrams 
+  filter(word1 != "ecprconf18", word2 != "ecprconf18") %>%
+  count(word1, word2, sort = T) %>% 
+  ## select first 100
+  slice(1:100) %>% 
+  drop_na() %>%
+  ## create tidy graph object
+  as_tbl_graph() %>% 
+  ## calculate node centrality
+  mutate(Popularity = centrality_degree(mode = 'in'))
+```
+
+
+```{r}
+gg_bigram %>% 
+  ggraph() +
+  geom_edge_link(aes(edge_alpha = n, edge_width = n)) +
+  geom_node_point(aes(size = Popularity)) + 
+  geom_node_text(aes(label = name),  repel = TRUE) +
+  theme_void() +
+  scale_edge_alpha("", range = c(0.3, .6)) +
+  ggtitle("Top Bigram Network from Tweets using hashtag #ecprconf18")
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
+
