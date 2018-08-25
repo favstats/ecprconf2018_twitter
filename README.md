@@ -190,7 +190,7 @@ rt %>%
 
 ![](ecprconf2018_twitter_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
 
-## Retweet Network
+## Mentions Network
 
 ``` r
 rt_graph <- rt %>% 
@@ -204,7 +204,7 @@ rt_graph <- rt %>%
   ungroup %>% 
   ## drop missing values
   drop_na %>% 
-  ## fliter those coocurences that appear at least 2 times
+  ## filter those coocurences that appear at least 2 times
   filter(n > 1) %>% 
   ## transforming the dataframe to a graph object
   as_tbl_graph() %>% 
@@ -277,6 +277,48 @@ rt_graph %>%
 
 ![](ecprconf2018_twitter_files/figure-gfm/unnamed-chunk-6-3.png)<!-- -->
 
+### Smaller Mentions Network (n \> 2)
+
+``` r
+rt_graph2 <- rt %>% 
+  ## select relevant variables
+  dplyr::select(screen_name, mentions_screen_name) %>% 
+  ## unnest list of mentions_screen_name
+  unnest %>% 
+  ## count the number of coocurences
+  group_by(screen_name, mentions_screen_name) %>% 
+  tally(sort = T) %>%
+  ungroup %>% 
+  ## drop missing values
+  drop_na %>% 
+  ## filter those coocurences that appear at least 2 times
+  filter(n > 2) %>% 
+  ## transforming the dataframe to a graph object
+  as_tbl_graph() %>% 
+  ## calculating node centrality
+  mutate(popularity = centrality_degree(mode = 'in'))
+
+rt_graph2 %>% 
+  ## create graph layout
+  ggraph(layout = "kk") + 
+  ## define edge aestetics
+  geom_edge_fan(aes(alpha = n, edge_width = n, color = n)) + 
+  ## scale down link saturation
+  scale_edge_alpha(range = c(.5, .9)) +
+  ## define note size param
+  scale_edge_color_gradient(low = "gray50", high = "#1874CD") +
+  geom_node_point(aes(size = popularity), color = "gray30") +
+  ## equal width and height
+  coord_fixed() +
+  geom_node_text(aes(label = name), repel = T, fontface = "bold") +
+  ## plain theme
+  theme_void() +
+  ## title
+  ggtitle("#ecprconf18 Twitter Mentions Network")
+```
+
+![](ecprconf2018_twitter_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
 ## Most Frequent Hashtags
 
 ``` r
@@ -304,7 +346,7 @@ rt_hashtags %>%
   ggtitle("Most Frequent Hastags related to #ecprconf18")
 ```
 
-![](ecprconf2018_twitter_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+![](ecprconf2018_twitter_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
 
 ## Most Frequent Bigram Network
 
@@ -352,7 +394,7 @@ gg_bigram %>%
   ggtitle("Top Bigram Network from Tweets using hashtag #ecprconf18")
 ```
 
-![](ecprconf2018_twitter_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+![](ecprconf2018_twitter_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
 ``` r
 sessionInfo()
